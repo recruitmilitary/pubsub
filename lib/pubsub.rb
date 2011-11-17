@@ -36,7 +36,7 @@ module PubSub
 
   # Public: Returns the current amqp_url
   def amqp_url
-    @amqp_url ||= ENV['AMQP_URL'] || 'amqp://localhost:5672'
+    @amqp_url ||= ENV['AMQP_URL'] || 'amqp://guest:guest@localhost:5672/'
   end
 
   # Public: Sets the error handler
@@ -75,7 +75,7 @@ module PubSub
   def run
     register_signal_handlers
 
-    AMQP.start(amqp_url) do |connection|
+    AMQP.start(config) do |connection|
       channel = AMQP::Channel.new(connection)
 
       process_subscriptions(channel)
@@ -115,13 +115,27 @@ module PubSub
     exchange.publish(encoded)
   end
 
+  # Public: Returns the hash of configuration options.
+  def config
+    uri = URI.parse(amqp_url)
+    {
+      :vhost => uri.path,
+      :host  => uri.host,
+      :user  => uri.user,
+      :port  => (uri.port || 5672),
+      :pass  => uri.password
+    }
+  rescue => e
+    raise("invalid AMQP_URL: #{uri.inspect} (#{e})")
+  end
+
   # Internal: An instance of Bunny to use for synchronously publishing
   # messages to an exchange.
   #
   # Returns a Bunny instance.
   def bunny
     @bunny ||= begin
-                 bunny = Bunny.new(:logging => false)
+                 bunny = Bunny.new(config.merge(:logging => false))
                  bunny.start
                  bunny
                end

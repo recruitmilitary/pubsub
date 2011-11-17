@@ -1,7 +1,5 @@
 require 'pubsub'
 
-PubSub.amqp_url = "amqp://localhost:5672"
-
 describe PubSub do
   it 'publishes and subscribes' do
     incoming = nil
@@ -14,7 +12,7 @@ describe PubSub do
 
     # I really have no idea what I'm doing here, but it seems to work
     # so I'm going to roll with it.
-    t = Thread.new { sleep 0.01; PubSub.stop }
+    t = Thread.new { sleep 0.1; PubSub.stop }
     PubSub.run
     t.join
 
