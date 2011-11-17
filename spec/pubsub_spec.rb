@@ -1,6 +1,6 @@
 require 'pubsub'
 
-PubSub.uri = "amqp://localhost:5672"
+PubSub.amqp_url = "amqp://localhost:5672"
 
 describe PubSub do
   it 'publishes and subscribes' do
