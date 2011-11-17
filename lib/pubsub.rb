@@ -45,14 +45,27 @@ module PubSub
   end
 
   # Set the default error handler
-  PubSub.error_handler do |e|
+  PubSub.error_handler do |error, queue, message, headers|
     raise e
   end
 
   # Public: Handles an error when they occur.  The default error
   # handler just raises the exception.
-  def handle_error(error)
-    @error_handler.call(error)
+  def handle_error(error, queue, message, headers)
+    @error_handler.call(error, queue, message, headers)
+  end
+
+  # Public: Sets the logger
+  def logger(&block)
+    @logger = block
+  end
+
+  # Set the default logger to ignore messages
+  PubSub.logger {}
+
+  # Public: Send a message to the logger
+  def log(message)
+    @logger.call(message)
   end
 
   # Public: Starts the EventMachine and AMQP loop waiting for work to

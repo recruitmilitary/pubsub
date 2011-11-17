@@ -15,7 +15,7 @@ module PubSub
           parsed = PubSub.decode(payload)
           @action.call(parsed)
         rescue => e
-          PubSub.handle_error(e)
+          PubSub.handle_error(e, @queue_name, payload, metadata)
         end
 
         metadata.ack
