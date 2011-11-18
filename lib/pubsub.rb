@@ -158,7 +158,22 @@ module PubSub
   #
   # Returns nothing.
   def process_subscriptions(channel)
-    subscriptions.each { |sub| sub.process(channel) }
+    subscriptions.each do |subscription|
+      bounces = channel.fanout(subscription.exchange_name)
+
+      channel.queue(subscription.queue_name, :auto_delete => false,
+                                             :durable     => true).
+        bind(bounces).subscribe(:ack => true) do |metadata, payload|
+        begin
+          parsed = decode(payload)
+          subscription.action.call(parsed)
+        rescue => e
+          handle_error(e, @queue_name, payload, metadata)
+        end
+
+        metadata.ack
+      end
+    end
   end
 
   # Internal: Return a collection of current subscriptions.
