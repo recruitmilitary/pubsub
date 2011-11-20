@@ -110,9 +110,11 @@ module PubSub
   # Returns nothing.
   def publish(exchange_name, payload)
     encoded  = encode(payload)
-    exchange = bunny.exchange(exchange_name, :type => :fanout)
 
-    exchange.publish(encoded)
+    connect do |bunny|
+      exchange = bunny.exchange(exchange_name, :type => :fanout)
+      exchange.publish(encoded)
+    end
   end
 
   # Public: Returns the hash of configuration options.
@@ -133,12 +135,11 @@ module PubSub
   # messages to an exchange.
   #
   # Returns a Bunny instance.
-  def bunny
-    @bunny ||= begin
-                 bunny = Bunny.new(config.merge(:logging => false))
-                 bunny.start
-                 bunny
-               end
+  def connect
+    bunny = Bunny.new(config.merge(:logging => false))
+    bunny.start
+    yield bunny if block_given?
+    bunny.stop
   end
 
   # Public: Configure a block to be run when a message is received for
