@@ -1,40 +1,153 @@
 require 'pubsub'
+require 'pry'
 
+# Sleep statements are required because Bunny runs in a separate thread, and 
+# if messages publish before subscribe Rabbit discards it. So the only options  
+# is to subscribe, publish, sleep/receive, then test.
+#
+# The alternative is to do expectations inside the block, but then there is no 
+# way to ensure that the expectation was actually reached, and the spec will 
+# pass regardless.
 describe PubSub do
-  def run
-    # I really have no idea what I'm doing here, but it seems to work
-    # so I'm going to roll with it.
-    t = Thread.new { sleep 0.1; PubSub.stop }
-    PubSub.run
-    t.join
+  let(:connect_opts) {{host: 'localhost', port: 5672} }
+  let(:pubsub) {ps = PubSub.new(connect_opts); ps.start; ps}
+
+  before do
+    PubSub::Config.default_exchange_opts = {type: :fanout, durable: false, auto_delete: false}
+    PubSub::Config.default_queue_opts = {durable: true, auto_delete: false}
+    pubsub.change_default_exchange("pubsub.test")
+  end
+
+  after do
+    #pubsub.stop
+    pubsub.channel.consumers.values.each(&:cancel)
   end
 
   it 'publishes and subscribes' do
     incoming = nil
 
-    PubSub.subscribe("pubsub.test", "test") do |payload|
+    pubsub.publish({email: 'a@a.com'})
+
+    pubsub.subscribe("test", subscribe: {block: true}) do |di, metadata, payload|
       incoming = payload
+      di.consumer.cancel
     end
+    pubsub.run
 
-    PubSub.publish("pubsub.test", :email => "a@a.com")
-    run
-
-    incoming.should == { 'email' => 'a@a.com' }
+    expect(incoming).to eq('email' => 'a@a.com')
   end
 
   it 'allows custom error handlers' do
     error = []
-    PubSub.error_handler { |*args| error = args }
+    pubsub.error_handler { |*args| error = args; args.last.consumer.cancel }
 
-    PubSub.publish("pubsub.test", "notjson")
-    run
+    pubsub.publish("notjson")
+    pubsub.subscribe("test", subscribe: {block: true}) {|payload, md, di| }
+    pubsub.run
 
-    exception, queue, message, headers = error
+    exception, queue, message, metadata, di = error
 
-    exception.should be_an_instance_of MultiJson::DecodeError
-    exception.message.should == 'unexpected "notjson"'
-    queue.should == nil
-    message.should == '"notjson"'
-    headers.should be_an_instance_of AMQP::Header
+    expect(exception).to be_an_instance_of MultiJson::DecodeError
+    expect(exception.message).to eq("795: unexpected token at 'notjson'")
+    expect(queue).to eq("test")
+    expect(message).to eq('notjson')
+    expect(metadata).to be_an_instance_of Bunny::MessageProperties
+    expect(di).to be_an_instance_of Bunny::DeliveryInfo
+  end
+
+  it "properly changes the default exchange" do
+    fanout_msg = nil
+    topic_msg = nil
+
+    pubsub.publish({a: 1}, exchange: {name: 'pubsub.test', type: :fanout})
+    pubsub.publish({b: 2}, routing_key: 'stuff', exchange: {name: 'pubsub.topic', type: :topic})
+
+    pubsub.subscribe("test", subscribe: {block: true}) do |di, metadata, payload|
+      fanout_msg = payload
+      di.consumer.cancel
+    end
+
+    pubsub.change_default_exchange('pubsub.topic', type: :topic)
+
+    pubsub.subscribe_topic("pubsub.test.topic", "stuff", subscribe: {block: true}) do |di, metadata, payload|
+      topic_msg = payload
+      di.consumer.cancel
+    end
+    
+    pubsub.run
+
+    expect(fanout_msg).to eq('a' => 1)
+    expect(topic_msg).to eq('b' => 2)
+  end
+
+  it "uses a custom decoder" do
+    decoded = nil
+    custom_decoder = ->(payload, metadata) {'decoded'}
+    pubsub.publish({email: 'a@a.com'})
+
+    pubsub.subscribe("test", decoder: custom_decoder, subscribe: {block: true}) do |di, metadata, payload|
+      decoded = payload
+      di.consumer.cancel
+    end
+    pubsub.run
+
+    expect(decoded).to eq('decoded')
+  end
+
+  describe '#change_default_exchange' do
+    it "changes the default exchange name" do
+      pubsub.change_default_exchange("pubsub.changed")
+      expect(pubsub.default_exchange_name).to eq('pubsub.changed')
+    end
+
+    it "merges the exchange options with the default exchange options" do
+      pubsub.change_default_exchange("pubsub.changed", type: :topic)
+      expected = PubSub::Config.default_exchange_opts.merge(type: :topic)
+      expect(pubsub.default_exchange_opts).to eq(expected)
+    end
+  end
+
+  describe '#default_exchange' do
+    it "creates an exchange using the default information if not present" do
+      exchange_opts = {type: 'topic', auto_delete: true, durable: false}
+      pubsub.change_default_exchange('pubsub.default_test', exchange_opts)
+      expect(pubsub.channel).to receive(:exchange).with('pubsub.default_test', exchange_opts)
+      pubsub.default_exchange
+    end
+
+    it "caches the exchange" do
+      pubsub.default_exchange
+      expect(pubsub.channel).not_to receive(:exchange)
+      pubsub.default_exchange
+    end
+  end
+
+  describe "#exchange" do
+    context 'without name' do 
+      it "returns the default exchange with no name given" do
+        expect(pubsub.exchange(nil)).to eq(pubsub.default_exchange)
+      end
+    end
+
+    context 'with name' do
+      it "creates a new exchange with default options" do
+        expected_opts = PubSub::Config.default_exchange_opts.merge(type: :topic)
+        expect(pubsub.channel).to receive(:exchange).with('pubsub.exchange', expected_opts)
+        pubsub.exchange('pubsub.exchange', type: :topic)
+      end
+
+      it "caches the exchange" do
+        pubsub.exchange('pubsub.exchange', type: :topic)
+        expect(pubsub.channel).not_to receive(:exchange)
+        pubsub.exchange('pubsub.exchange', type: :topic)
+      end
+    end
+  end
+
+  describe "#stop" do
+    it "should stop the connection" do
+      expect(pubsub.connection).to receive(:close)
+      pubsub.stop
+    end
   end
 end

@@ -5,8 +5,8 @@ require "pubsub/version"
 Gem::Specification.new do |s|
   s.name        = "pubsub"
   s.version     = PubSub::VERSION
-  s.authors     = ["Michael Guterl"]
-  s.email       = ["michael@diminishing.org"]
+  s.authors     = ["RecruitMilitary"]
+  s.email       = ["support@recruitmilitary.com"]
   s.homepage    = ""
   s.summary     = %q{Simple PubSub wrapper for RabbitMQ}
   s.description = %q{Simple PubSub wrapper for RabbitMQ}
@@ -19,8 +19,10 @@ Gem::Specification.new do |s|
   s.require_paths = ["lib"]
 
   s.add_development_dependency "rspec"
-  s.add_runtime_dependency "amqp", "~> 0.8.3"
-  s.add_runtime_dependency "bunny", "~> 0.7.8"
+  s.add_development_dependency "pry"
+  s.add_development_dependency "pry-byebug"
+  s.add_development_dependency "pry-stack_explorer"
+  s.add_runtime_dependency "bunny", "~> 2.2.0"
   s.add_runtime_dependency "multi_json"
 
 end

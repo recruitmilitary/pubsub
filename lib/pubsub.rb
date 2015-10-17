@@ -1,8 +1,10 @@
 require 'pubsub/version'
 
-require 'amqp'
 require 'bunny'
 require 'multi_json'
+
+require 'pubsub/config'
+require 'pubsub/subscription'
 
 # Public: Various methods useful for performing publish and subscribe
 # via RabbitMQ.
@@ -20,23 +22,61 @@ require 'multi_json'
 #   PubSub will receive the JSON payload and print it to stdout.
 #
 #   {"foo"=>"bar"}
-module PubSub
-  extend self
+class PubSub
+  attr_reader :connection_opts, :connection, :channel
 
-  autoload :Subscription, 'pubsub/subscription'
+  class << self
+    def configure
+      yield Config
+    end
+  end
 
-  # Public: Set the AMQP URL for PubSub to connect to.
-  #
-  # Examples
-  #
-  #   PubSub.amqp_url = "amqp://user:password@rabbithost/"
-  #
-  # Returns nothing.
-  attr_writer :amqp_url
+  def initialize(connection_and_opts = {})
+    exchange = connection_and_opts.delete(:exchange) || {}
+    @default_exchange_name = exchange.delete(:name)
+    @default_exchange_opts = exchange
 
-  # Public: Returns the current amqp_url
-  def amqp_url
-    @amqp_url ||= ENV['AMQP_URL'] || 'amqp://guest:guest@localhost:5672/'
+    @connection_opts = Config.connection_hash.merge(connection_and_opts)
+    @exchanges = {}
+
+    self.decoder = ->(payload, metadata) {decode(payload)}
+    self.logger {}
+    self.error_handler do |error, queue, message, metadata, delivery_info|
+      raise error
+    end
+  end
+
+  def start
+    @connection = Bunny.new(connection_opts)
+    @connection.start
+    register_signal_handlers
+
+    @channel = @connection.create_channel
+  end
+
+  def change_default_exchange(name, opts = {})
+    @default_exchange_name = name
+    @default_exchange_opts = Config.default_exchange_opts.merge(opts)
+  end
+
+  def default_exchange
+    @exchanges[default_exchange_name] ||= channel.exchange(default_exchange_name, default_exchange_opts) if default_exchange_name
+  end
+
+  def default_exchange_name
+    @default_exchange_name
+  end
+
+  def default_exchange_opts
+    @default_exchange_opts
+  end
+
+  def decoder=(d)
+    @decoder = d
+  end
+
+  def decoder
+    @decoder
   end
 
   # Public: Sets the error handler
@@ -44,15 +84,10 @@ module PubSub
     @error_handler = block
   end
 
-  # Set the default error handler
-  PubSub.error_handler do |error, queue, message, headers|
-    raise e
-  end
-
   # Public: Handles an error when they occur.  The default error
   # handler just raises the exception.
-  def handle_error(error, queue, message, headers)
-    @error_handler.call(error, queue, message, headers)
+  def handle_error(error, queue, message, metadata, delivery_info)
+    @error_handler.call(error, queue, message, metadata, delivery_info)
   end
 
   # Public: Sets the logger
@@ -60,12 +95,18 @@ module PubSub
     @logger = block
   end
 
-  # Set the default logger to ignore messages
-  PubSub.logger {}
-
   # Public: Send a message to the logger
   def log(message)
     @logger.call(message)
+  end
+
+  def exchange(name, opts = {})
+    if name
+      opts = Config.default_exchange_opts.merge(opts)
+      @exchanges[name] ||= channel.exchange(name, opts)
+    else
+      default_exchange
+    end
   end
 
   # Public: Starts the EventMachine and AMQP loop waiting for work to
@@ -73,30 +114,35 @@ module PubSub
   #
   # Returns nothing.
   def run
-    register_signal_handlers
-
-    AMQP.start(config) do |connection|
-      channel = AMQP::Channel.new(connection)
-
-      process_subscriptions(channel)
+    subscriptions.each do |sub|
+      ex = exchange(sub.exchange_name, sub.exchange_opts)
+      channel.queue(sub.queue_name, sub.queue_opts).
+        bind(ex, sub.bind_opts).subscribe(sub.subscribe_opts) do |delivery_info, metadata, payload|
+        begin
+          decoded = (sub.decoder || decoder).call(payload, metadata)
+          sub.action.call(delivery_info, metadata, decoded)
+        rescue => e
+          handle_error(e, sub.queue_name, payload, metadata, delivery_info)
+        end
+      end
     end
   end
 
-  # Public: Stops the EventMachine and AMQP run loop
+  # Public: Stops the bunny conection and channel
   #
   # Returns nothing.
   def stop
-    AMQP.stop { EventMachine.stop }
+    connection.close if connection
   end
 
-  # Internal: Stop the EventMachine and AMQP run loop when INT or TERM
+  # Internal: Stop the Bunny connection and channel when INT or TERM
   # signals are received.
   #
   # Returns nothing.
   def register_signal_handlers
     ['INT', 'TERM'].each do |signal|
       Signal.trap(signal) {
-        PubSub.stop
+        stop
       }
     end
   end
@@ -108,38 +154,19 @@ module PubSub
   #                 the exchange.
   #
   # Returns nothing.
-  def publish(exchange_name, payload)
-    encoded  = encode(payload)
+  def publish(payload, metadata = {})
+    exchange_opts = metadata.delete(:exchange) || {}
+    encoded = String===payload ? payload : encode(payload)
 
-    connect do |bunny|
-      exchange = bunny.exchange(exchange_name, :type => :fanout)
-      exchange.publish(encoded)
-    end
+    ex = exchange(exchange_opts.delete(:name), exchange_opts)
+    ex.publish(encoded, metadata)
+
+    encoded
   end
 
-  # Public: Returns the hash of configuration options.
-  def config
-    uri = URI.parse(amqp_url)
-    {
-      :vhost => uri.path,
-      :host  => uri.host,
-      :user  => uri.user,
-      :port  => (uri.port || 5672),
-      :pass  => uri.password
-    }
-  rescue => e
-    raise("invalid AMQP_URL: #{uri.inspect} (#{e})")
-  end
-
-  # Internal: An instance of Bunny to use for synchronously publishing
-  # messages to an exchange.
-  #
-  # Returns a Bunny instance.
-  def connect
-    bunny = Bunny.new(config.merge(:logging => false))
-    bunny.start
-    yield bunny if block_given?
-    bunny.stop
+  def publish_topic(payload, routing_key, metadata = {})
+    metadata[:routing_key] = routing_key
+    publish(payload, metadata)
   end
 
   # Public: Configure a block to be run when a message is received for
@@ -150,33 +177,19 @@ module PubSub
   # action        - A block to be run when a message is received.
   #
   # Returns nothing.
-  def subscribe(exchange_name, queue_name, &action)
-    subscriptions << Subscription.new(exchange_name, queue_name, &action)
+  def subscribe(queue_name, options = {}, &action)
+    options[:exchange] = {name: default_exchange_name}.merge(Config.default_exchange_opts.merge(options[:exchange] ||= {}))
+    options[:queue] = Config.default_queue_opts.merge(options[:queue] ||= {})
+    subscriptions << Subscription.new(queue_name, options, &action)
   end
 
-  # Internal: Loop through each subscription processing it against the
-  # channel.
-  #
-  # Returns nothing.
-  def process_subscriptions(channel)
-    subscriptions.each do |subscription|
-      bounces = channel.fanout(subscription.exchange_name)
-
-      channel.queue(subscription.queue_name, :auto_delete => false,
-                                             :durable     => true).
-        bind(bounces).subscribe(:ack => true) do |metadata, payload|
-        begin
-          parsed = decode(payload)
-          subscription.action.call(parsed)
-        rescue => e
-          handle_error(e, @queue_name, payload, metadata)
-        end
-
-        metadata.ack
-      end
-    end
+  def subscribe_topic(queue_name, routing_key, options = {}, &action)
+    (options[:bind] ||= {}).merge!(routing_key: routing_key)
+    (options[:exchange] ||= {}).merge!(type: :topic)
+    subscribe(queue_name, options, &action)
   end
 
+  private
   # Internal: Return a collection of current subscriptions.
   def subscriptions
     @subscriptions ||= []

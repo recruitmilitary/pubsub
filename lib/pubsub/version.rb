@@ -1,3 +1,3 @@
-module PubSub
-  VERSION = "0.0.1"
+class PubSub
+  VERSION = "1.0.0"
 end
