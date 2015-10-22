@@ -22,7 +22,7 @@ Gem::Specification.new do |s|
   s.add_development_dependency "pry"
   s.add_development_dependency "pry-byebug"
   s.add_development_dependency "pry-stack_explorer"
-  s.add_runtime_dependency "bunny", "~> 2.2.0"
+  s.add_runtime_dependency "bunny", "2.0.1"
   s.add_runtime_dependency "multi_json"
 
 end
