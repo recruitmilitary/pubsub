@@ -144,6 +144,34 @@ describe PubSub do
     end
   end
 
+  describe '#transaction' do
+    it "sends the messages if there is no error" do
+      incoming = nil
+
+      expect(pubsub.default_exchange).to receive(:publish).with('{"email":"a@a.com"}', {})
+      expect(pubsub.default_exchange).to receive(:publish).with('{"name":"bob"}', {})
+
+      pubsub.transaction do
+        pubsub.publish({email: 'a@a.com'})
+        pubsub.publish({name: 'bob'})
+      end
+    end
+
+    it "does not send any messages if there is an error" do
+      incoming = nil
+
+      expect(pubsub.default_exchange).not_to receive(:publish)
+
+      begin
+      pubsub.transaction do
+        pubsub.publish({email: 'a@a.com'})
+        raise StandardError
+      end
+      rescue
+      end
+    end
+  end
+
   describe "#stop" do
     it "should stop the connection" do
       expect(pubsub.connection).to receive(:close)

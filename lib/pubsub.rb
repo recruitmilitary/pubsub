@@ -147,6 +147,27 @@ class PubSub
     end
   end
 
+  # Public: Accumulate all messages that are published within a block, and only 
+  # publish them after successful completion of the block.
+  #
+  # Returns array of delivered payloads
+  def transaction(&block)
+    # No transaction nesting
+    return @transacted_messages if !@transacted_messages.nil?
+
+    @transacted_messages = []
+    yield
+
+    # no errors, so now we'll publish
+    @transacted_messages.map do |ex, payload, metadata|
+      ex.publish(payload, metadata)
+      payload
+    end
+
+  ensure
+    @transacted_messages = nil
+  end
+
   # Public: Publish a message to RabbitMQ for processing in a worker.
   #
   # exchange_name - The name of the exchange to send the payload to.
@@ -159,7 +180,11 @@ class PubSub
     encoded = String===payload ? payload : encode(payload)
 
     ex = exchange(exchange_opts.delete(:name), exchange_opts)
-    ex.publish(encoded, metadata)
+    if @transacted_messages.nil?
+      ex.publish(encoded, metadata)
+    else
+      @transacted_messages << [ex, encoded, metadata]
+    end
 
     encoded
   end
