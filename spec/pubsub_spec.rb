@@ -9,7 +9,13 @@ require 'pry'
 # way to ensure that the expectation was actually reached, and the spec will 
 # pass regardless.
 describe PubSub do
-  let(:connect_opts) {{host: 'localhost', port: 5672} }
+  let(:connect_opts) {
+    if ENV['RABBITMQ_URL']
+      PubSub::Config.amqp_url = ENV['RABBITMQ_URL']
+    else
+      {host: 'localhost', port: 5672}
+    end
+  }
   let(:pubsub) {ps = PubSub.new(connect_opts); ps.start; ps}
 
   before do
