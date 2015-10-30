@@ -152,20 +152,26 @@ class PubSub
   #
   # Returns array of delivered payloads
   def transaction(&block)
-    # No transaction nesting
-    return @transacted_messages if !@transacted_messages.nil?
+    if @transacted_messages.nil?
+      begin
+        @transacted_messages = []
+        yield
 
-    @transacted_messages = []
-    yield
+        # no errors, so now we'll publish
+        @transacted_messages.map do |ex, payload, metadata|
+          ex.publish(payload, metadata)
+          payload
+        end
 
-    # no errors, so now we'll publish
-    @transacted_messages.map do |ex, payload, metadata|
-      ex.publish(payload, metadata)
-      payload
+      ensure
+        @transacted_messages = nil
+      end
+
+      return @transacted_messages if !@transacted_messages.nil?
+    else
+      #already in a transaction, just yield and carry on
+      yield
     end
-
-  ensure
-    @transacted_messages = nil
   end
 
   # Public: Publish a message to RabbitMQ for processing in a worker.

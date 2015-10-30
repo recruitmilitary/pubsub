@@ -146,8 +146,6 @@ describe PubSub do
 
   describe '#transaction' do
     it "sends the messages if there is no error" do
-      incoming = nil
-
       expect(pubsub.default_exchange).to receive(:publish).with('{"email":"a@a.com"}', {})
       expect(pubsub.default_exchange).to receive(:publish).with('{"name":"bob"}', {})
 
@@ -157,9 +155,16 @@ describe PubSub do
       end
     end
 
-    it "does not send any messages if there is an error" do
-      incoming = nil
+    it "can nest without problems" do
+      expect(pubsub.default_exchange).to receive(:publish).with('{"email":"a@a.com"}', {})
+      pubsub.transaction do
+        pubsub.transaction do
+          pubsub.publish({email: 'a@a.com'})
+        end
+      end
+    end
 
+    it "does not send any messages if there is an error" do
       expect(pubsub.default_exchange).not_to receive(:publish)
 
       begin
