@@ -5,14 +5,8 @@ class PubSub
       attr_writer :connection_hash
 
       def amqp_url=(url)
-        uri = URI.parse(amqp_url)
-        connection_hash = {
-          vhost: uri.path,
-          host: uri.host,
-          user: uri.user,
-          port: (uri.port || 5672),
-          pass: uri.password
-        }
+        parsed = AMQ::Settings.parse_amqp_url(url)
+        @connection_hash = parsed
       end
 
       def connection_hash

@@ -12,6 +12,7 @@ describe PubSub do
   let(:connect_opts) {
     if ENV['RABBITMQ_URL']
       PubSub::Config.amqp_url = ENV['RABBITMQ_URL']
+      {}
     else
       {host: 'localhost', port: 5672}
     end
