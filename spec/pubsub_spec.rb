@@ -44,6 +44,19 @@ describe PubSub do
     expect(incoming).to eq('email' => 'a@a.com')
   end
 
+  it "defaults to persistent messages" do
+    md = nil
+    pubsub.publish({email: 'a@a.com'}, {headers: {}, content_type: 'application/json', timestamp: Time.now.to_i})
+
+    pubsub.subscribe("test", subscribe: {block: true}) do |di, metadata, payload|
+      md = metadata
+      di.consumer.cancel
+    end
+    pubsub.run
+
+    expect(md[:delivery_mode]).to eq(2)
+  end
+
   it 'allows custom error handlers' do
     error = []
     pubsub.error_handler { |*args| error = args; args.last.consumer.cancel }
@@ -76,8 +89,10 @@ describe PubSub do
 
     pubsub.change_default_exchange('pubsub.topic', type: :topic)
 
+    md = nil
     pubsub.subscribe_topic("pubsub.test.topic", "stuff", subscribe: {block: true}) do |di, metadata, payload|
       topic_msg = payload
+      md = metadata
       di.consumer.cancel
     end
     
