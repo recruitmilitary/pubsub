@@ -39,7 +39,7 @@ describe PubSub do
 
     pubsub.publish({email: 'a@a.com'})
 
-    pubsub.subscribe("test", subscribe: {block: true, manual_ack: true}) do |di, metadata, payload|
+    pubsub.subscribe("test", subscribe: {block: true, manual_ack: false}) do |di, metadata, payload|
       incoming = payload
       di.consumer.cancel
     end
@@ -52,7 +52,7 @@ describe PubSub do
     md = nil
     pubsub.publish({email: 'a@a.com'}, {headers: {}, content_type: 'application/json', timestamp: Time.now.to_i})
 
-    pubsub.subscribe("test", subscribe: {block: true, manual_ack: true}) do |di, metadata, payload|
+    pubsub.subscribe("test", subscribe: {block: true, manual_ack: false}) do |di, metadata, payload|
       md = metadata
       di.consumer.cancel
     end
@@ -66,7 +66,7 @@ describe PubSub do
     pubsub.error_handler { |*args| error = args; args.last.consumer.cancel }
 
     pubsub.publish("notjson")
-    pubsub.subscribe("test", subscribe: {block: true, manual_ack: true}) {|payload, md, di| }
+    pubsub.subscribe("test", subscribe: {block: true, manual_ack: false}) {|payload, md, di| }
     pubsub.run
 
     exception, queue, message, metadata, di = error
@@ -101,7 +101,7 @@ describe PubSub do
     pubsub.publish({a: 1}, exchange: {name: 'pubsub.test', type: :fanout})
     pubsub.publish({b: 2}, routing_key: 'stuff', exchange: {name: 'pubsub.topic', type: :topic})
 
-    pubsub.subscribe("test", subscribe: {block: true, manual_ack: true}) do |di, metadata, payload|
+    pubsub.subscribe("test", subscribe: {block: true, manual_ack: false}) do |di, metadata, payload|
       fanout_msg = payload
       di.consumer.cancel
     end
@@ -109,7 +109,7 @@ describe PubSub do
     pubsub.change_default_exchange('pubsub.topic', type: :topic)
 
     md = nil
-    pubsub.subscribe_topic("pubsub.test.topic", "stuff", subscribe: {block: true, manual_ack: true}) do |di, metadata, payload|
+    pubsub.subscribe_topic("pubsub.test.topic", "stuff", subscribe: {block: true, manual_ack: false}) do |di, metadata, payload|
       topic_msg = payload
       md = metadata
       di.consumer.cancel
@@ -126,7 +126,7 @@ describe PubSub do
     custom_decoder = ->(payload, metadata) {'decoded'}
     pubsub.publish({email: 'a@a.com'})
 
-    pubsub.subscribe("test", decoder: custom_decoder, subscribe: {block: true, manual_ack: true}) do |di, metadata, payload|
+    pubsub.subscribe("test", decoder: custom_decoder, subscribe: {block: true, manual_ack: false}) do |di, metadata, payload|
       decoded = payload
       di.consumer.cancel
     end
