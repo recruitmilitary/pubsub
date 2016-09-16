@@ -8,6 +8,7 @@ class PubSub
       @exchange_name = @exchange_opts.delete(:name)
       @queue_opts = options.delete(:queue) || {}
       @subscribe_opts = options.delete(:subscribe) || {}
+      @subscribe_opts[:manual_ack] = true unless @subscribe_opts.has_key?(:manual_ack)
       @bind_opts = options.delete(:bind) || {}
       @queue_name    = queue_name
       @decoder       = options[:decoder]
